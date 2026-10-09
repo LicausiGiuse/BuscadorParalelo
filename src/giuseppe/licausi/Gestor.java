@@ -1,226 +1,159 @@
 package giuseppe.licausi;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.Locale;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class Gestor {
 
     private static final int MAX_PROCESOS = 4;
+    private static final Path INFORME = Paths.get("informe.txt");
+    private static final Path ERRORES = Paths.get("errores.log");
 
     public static void main(String[] args) {
+        if (!inicializarSalidas()) {
+            return;
+        }
 
         if (args.length != 2) {
-            System.err.println(
-                    "Uso: java giuseppe.licausi.Gestor palabra carpeta"
-            );
+            registrarError("Uso: java giuseppe.licausi.Gestor palabra carpeta. Debes indicar exactamente dos parámetros.");
             return;
         }
 
         String palabra = args[0];
+        if (palabra == null || palabra.trim().isEmpty()) {
+            registrarError("La palabra a buscar no puede estar vacía.");
+            return;
+        }
+
         File carpeta = new File(args[1]);
-
-        // Comprobar que existe
         if (!carpeta.exists()) {
-            System.err.println("Error: la carpeta no existe.");
+            registrarError("La carpeta no existe: " + carpeta.getAbsolutePath());
             return;
         }
-
-        // Comprobar que es una carpeta
         if (!carpeta.isDirectory()) {
-            System.err.println("Error: la ruta indicada no es una carpeta.");
+            registrarError("La ruta indicada no es una carpeta: " + carpeta.getAbsolutePath());
             return;
         }
 
-        // Obtener solamente los .txt
-        File[] archivos = carpeta.listFiles(
-                file -> file.isFile() &&
-                        file.getName().toLowerCase().endsWith(".txt")
-        );
-
+        Path rutaInforme = INFORME.toAbsolutePath().normalize();
+        File[] archivos = carpeta.listFiles(file ->
+                file.isFile()
+                        && !file.toPath().toAbsolutePath().normalize().equals(rutaInforme)
+                        && file.getName().toLowerCase(Locale.ROOT).endsWith(".txt"));
         if (archivos == null) {
-            System.err.println("Error al acceder a la carpeta.");
+            registrarError("No se pudo leer el contenido de la carpeta: " + carpeta.getAbsolutePath());
             return;
         }
-
         if (archivos.length == 0) {
+            escribirInforme("No se han encontrado archivos .txt en " + carpeta.getAbsolutePath());
             System.out.println("No se han encontrado archivos .txt.");
             return;
         }
 
-        /*
-         * Máximo 4 procesos simultáneos.
-         */
-        ExecutorService executor =
-                Executors.newFixedThreadPool(MAX_PROCESOS);
-
+        ExecutorService executor = Executors.newFixedThreadPool(MAX_PROCESOS);
         List<Future<String>> resultados = new ArrayList<>();
-
-        /*
-         * Crear los procesos.
-         */
-        for (File archivo : archivos) {
-
-            Future<String> resultado = executor.submit(
-                    () -> ejecutarBuscador(palabra, archivo)
-            );
-
-            resultados.add(resultado);
-        }
-
-        /*
-         * Esperamos a que terminen todos.
-         */
-        executor.shutdown();
-
-        /*
-         * Crear informe y log de errores.
-         */
-        try (
-                BufferedWriter informe = new BufferedWriter(
-                        new FileWriter("informe.txt")
-                );
-
-                BufferedWriter errores = new BufferedWriter(
-                        new FileWriter("errores.log")
-                )
-        ) {
+        try {
+            for (File archivo : archivos) {
+                resultados.add(executor.submit(() -> ejecutarBuscador(palabra, archivo)));
+            }
+            executor.shutdown();
 
             for (Future<String> resultado : resultados) {
-
                 try {
-
-                    String salida = resultado.get();
-
-                    if (salida != null && !salida.isEmpty()) {
-
-                        informe.write(salida);
-                        informe.newLine();
+                    String error = resultado.get();
+                    if (error != null) {
+                        registrarError(error);
                     }
-
                 } catch (InterruptedException e) {
-
                     Thread.currentThread().interrupt();
-
-                    errores.write(
-                            "El proceso Gestor fue interrumpido: "
-                                    + e.getMessage()
-                    );
-
-                    errores.newLine();
-
+                    executor.shutdownNow();
+                    registrarError("El proceso Gestor fue interrumpido mientras esperaba a los Buscadores.");
+                    return;
                 } catch (ExecutionException e) {
-
-                    errores.write(
-                            "Error ejecutando un Buscador: "
-                                    + e.getCause()
-                    );
-
-                    errores.newLine();
+                    Throwable causa = e.getCause() == null ? e : e.getCause();
+                    registrarError("Error ejecutando un Buscador: " + causa.getMessage());
                 }
             }
-
-        } catch (IOException e) {
-
-            System.err.println(
-                    "Error al crear los archivos de salida: "
-                            + e.getMessage()
-            );
+        } finally {
+            if (!executor.isShutdown()) {
+                executor.shutdownNow();
+            }
         }
 
-        System.out.println("Proceso terminado.");
-        System.out.println("Consulta informe.txt y errores.log.");
+        System.out.println("Proceso terminado. Consulta informe.txt y errores.log.");
     }
 
+    private static boolean inicializarSalidas() {
+        try {
+            Files.write(INFORME, new byte[0], StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.write(ERRORES, new byte[0], StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            return true;
+        } catch (IOException e) {
+            System.err.println("No se pudieron crear informe.txt y errores.log: " + e.getMessage());
+            return false;
+        }
+    }
 
-    private static String ejecutarBuscador(
-            String palabra,
-            File archivo
-    ) {
-
+    private static String ejecutarBuscador(String palabra, File archivo) {
+        String java = Paths.get(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java").toString();
         ProcessBuilder pb = new ProcessBuilder(
-                "java",
+                java,
                 "-cp",
                 System.getProperty("java.class.path"),
                 "giuseppe.licausi.Buscador",
                 palabra,
                 archivo.getAbsolutePath()
         );
+        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(INFORME.toFile()));
+        pb.redirectError(ProcessBuilder.Redirect.appendTo(ERRORES.toFile()));
 
         try {
-
             Process proceso = pb.start();
-
-            /*
-             * Leer salida estándar del Buscador.
-             */
-            BufferedReader salida = new BufferedReader(
-                    new InputStreamReader(
-                            proceso.getInputStream()
-                    )
-            );
-
-            /*
-             * Leer salida de error.
-             */
-            BufferedReader error = new BufferedReader(
-                    new InputStreamReader(
-                            proceso.getErrorStream()
-                    )
-            );
-
-            StringBuilder resultado = new StringBuilder();
-
-            String linea;
-
-            while ((linea = salida.readLine()) != null) {
-
-                resultado.append(linea);
-            }
-
-            /*
-             * Esperar a que termine el proceso.
-             */
             int codigoSalida = proceso.waitFor();
-
-            /*
-             * Si hubo errores, los devolvemos para
-             * que el Gestor pueda registrarlos.
-             */
             if (codigoSalida != 0) {
-
-                StringBuilder mensajeError = new StringBuilder();
-
-                while ((linea = error.readLine()) != null) {
-
-                    mensajeError.append(linea).append("\n");
-                }
-
-                throw new IOException(
-                        mensajeError.toString()
-                );
+                return "El Buscador de " + archivo.getName() + " terminó con código " + codigoSalida
+                        + ". Consulta errores.log para ver el detalle.";
             }
-
-            return resultado.toString();
-
+            return null;
         } catch (IOException e) {
-
-            throw new RuntimeException(
-                    "Error ejecutando Buscador para "
-                            + archivo.getName()
-                            + ": "
-                            + e.getMessage()
-            );
-
+            return "No se pudo iniciar el Buscador para " + archivo.getName() + ": " + e.getMessage();
         } catch (InterruptedException e) {
-
             Thread.currentThread().interrupt();
+            return "Se interrumpió el Buscador para " + archivo.getName() + ".";
+        }
+    }
 
-            throw new RuntimeException(
-                    "Proceso interrumpido: "
-                            + archivo.getName()
-            );
+    private static void escribirInforme(String mensaje) {
+        try {
+            Files.writeString(INFORME, mensaje + System.lineSeparator(), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            registrarError("No se pudo escribir informe.txt: " + e.getMessage());
+        }
+    }
+
+    private static void registrarError(String mensaje) {
+        System.err.println(mensaje);
+        try {
+            Files.writeString(ERRORES, mensaje + System.lineSeparator(), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            System.err.println("Tampoco se pudo escribir errores.log: " + e.getMessage());
         }
     }
 }
+
+

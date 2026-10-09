@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/BuscadorParalelo.iml" filepath="$PROJECT_DIR$/BuscadorParalelo.iml" />
+      <module fileurl="file://$PROJECT_DIR$/BuscadorEnParalelo.iml" filepath="$PROJECT_DIR$/BuscadorEnParalelo.iml" />
     </modules>
   </component>
 </project>
