@@ -1,0 +1,3 @@
+La cama está junto a la ventana.
+CAMA, cama: cama.
+Escama y camaleón no cuentan como la palabra cama completa.

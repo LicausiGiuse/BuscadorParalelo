@@ -1,0 +1,6 @@
+archivo;apariciones;lineas;PID;tiempo_ms
+result2.txt;0;1;20488;6
+errores.txt;0;0;21724;7
+result1.txt;0;1;12944;6
+parametro.txt;5;3;20084;5
+RESUMEN;archivos_procesados=4;apariciones_totales=5;errores=0;tiempo_total_ms=232
