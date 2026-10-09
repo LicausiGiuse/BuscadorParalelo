@@ -10,10 +10,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 public class Gestor {
 
@@ -62,34 +58,30 @@ public class Gestor {
             return;
         }
 
-        ExecutorService executor = Executors.newFixedThreadPool(MAX_PROCESOS);
-        List<Future<String>> resultados = new ArrayList<>();
+        List<ProcesoActivo> procesosActivos = new ArrayList<>();
         try {
             for (File archivo : archivos) {
-                resultados.add(executor.submit(() -> ejecutarBuscador(palabra, archivo)));
-            }
-            executor.shutdown();
+                // Si ya hay cuatro procesos hijos activos, esperamos a que termine uno.
+                if (procesosActivos.size() == MAX_PROCESOS) {
+                    ProcesoActivo terminado = procesosActivos.remove(0);
+                    esperarProceso(terminado);
+                }
 
-            for (Future<String> resultado : resultados) {
-                try {
-                    String error = resultado.get();
-                    if (error != null) {
-                        registrarError(error);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    executor.shutdownNow();
-                    registrarError("El proceso Gestor fue interrumpido mientras esperaba a los Buscadores.");
-                    return;
-                } catch (ExecutionException e) {
-                    Throwable causa = e.getCause() == null ? e : e.getCause();
-                    registrarError("Error ejecutando un Buscador: " + causa.getMessage());
+                ProcesoActivo proceso = iniciarBuscador(palabra, archivo);
+                if (proceso != null) {
+                    procesosActivos.add(proceso);
                 }
             }
-        } finally {
-            if (!executor.isShutdown()) {
-                executor.shutdownNow();
+
+            for (ProcesoActivo proceso : procesosActivos) {
+                esperarProceso(proceso);
             }
+        } catch (InterruptedException e) {
+            for (ProcesoActivo proceso : procesosActivos) {
+                proceso.proceso.destroyForcibly();
+            }
+            registrarError("El Gestor fue interrumpido mientras esperaba a los procesos Buscador.");
+            return;
         }
 
         System.out.println("Proceso terminado. Consulta informe.txt y errores.log.");
@@ -106,9 +98,9 @@ public class Gestor {
         }
     }
 
-    private static String ejecutarBuscador(String palabra, File archivo) {
+    private static ProcesoActivo iniciarBuscador(String palabra, File archivo) {
         String java = Paths.get(System.getProperty("java.home"), "bin",
-                System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java").toString();
+                System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java").toString();
         ProcessBuilder pb = new ProcessBuilder(
                 java,
                 "-cp",
@@ -121,18 +113,18 @@ public class Gestor {
         pb.redirectError(ProcessBuilder.Redirect.appendTo(ERRORES.toFile()));
 
         try {
-            Process proceso = pb.start();
-            int codigoSalida = proceso.waitFor();
-            if (codigoSalida != 0) {
-                return "El Buscador de " + archivo.getName() + " terminó con código " + codigoSalida
-                        + ". Consulta errores.log para ver el detalle.";
-            }
-            return null;
+            return new ProcesoActivo(archivo, pb.start());
         } catch (IOException e) {
-            return "No se pudo iniciar el Buscador para " + archivo.getName() + ": " + e.getMessage();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return "Se interrumpió el Buscador para " + archivo.getName() + ".";
+            registrarError("No se pudo iniciar el Buscador para " + archivo.getName() + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static void esperarProceso(ProcesoActivo activo) throws InterruptedException {
+        int codigoSalida = activo.proceso.waitFor();
+        if (codigoSalida != 0) {
+            registrarError("El Buscador de " + activo.archivo.getName() + " terminó con código " + codigoSalida
+                    + ". Consulta errores.log para ver el detalle.");
         }
     }
 
@@ -154,6 +146,14 @@ public class Gestor {
             System.err.println("Tampoco se pudo escribir errores.log: " + e.getMessage());
         }
     }
+
+    private static class ProcesoActivo {
+        private final File archivo;
+        private final Process proceso;
+
+        private ProcesoActivo(File archivo, Process proceso) {
+            this.archivo = archivo;
+            this.proceso = proceso;
+        }
+    }
 }
-
-
