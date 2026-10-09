@@ -24,12 +24,12 @@ public class Buscador {
         long inicio = System.currentTimeMillis();
         long pid = ProcessHandle.current().pid();
 
-        try (BufferedReader br = new BufferedReader(new FileReader("parametro.txt"))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(rutaArchivo))) {
 
             // (?i) = ignora mayúsculas/minúsculas
             // \\b = palabra completa
             Pattern patron = Pattern.compile(
-                    "\\b" + Pattern.quote("cama") + "\\b",
+                    "\\b" + Pattern.quote(palabra) + "\\b",
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
             );
 
