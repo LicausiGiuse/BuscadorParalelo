@@ -2,6 +2,9 @@ package giuseppe.licausi;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +15,8 @@ import java.util.regex.Pattern;
 public class Buscador {
 
     public static void main(String[] args) {
+        System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8));
         if (args.length != 2) {
             System.err.println("Error: debes indicar exactamente una palabra y un archivo.");
             System.exit(1);
@@ -56,3 +61,4 @@ public class Buscador {
         }
     }
 }
+
